@@ -35,7 +35,7 @@ FIELDNAMES = ['image_id', 'image_w','image_h','num_boxes', 'boxes', 'features']
 
 # Settings for the number of features per image. To re-create pretrained features with 36 features
 # per image, set both values to 36. 
-MIN_BOXES = 10
+MIN_BOXES = 100
 MAX_BOXES = 100
 
 def load_image_ids(split_name):
@@ -62,20 +62,6 @@ def load_image_ids(split_name):
           image_id = int(item['image_id'])
           filepath = os.path.join(root_path, 'VG_100K', item['url'].split('/')[-1])
           split.append((filepath,image_id))      
-    elif split_name == 'vrd_train':
-      anno_path = '/gfs/users/jayden/Multimodal/Projects/RR/data/VRD/'
-      img_path = '/gfs/users/jayden/data/sg_dataset/sg_train_images/'
-      with open(anno_path + 'annotations_train.json') as f:
-        for item in json.load(f):
-          filepath = os.path.join(img_path, item)
-          split.append((filepath,item))
-    elif split_name == 'vrd_test':
-      anno_path = '/gfs/users/jayden/Multimodal/Projects/RR/data/VRD/'
-      img_path = '/gfs/users/jayden/data/sg_dataset/sg_vrd_test_images/'
-      with open(anno_path + 'annotations_vrd_test.json') as f:
-        for item in json.load(f):
-          filepath = os.path.join(img_path, item)
-          split.append((filepath,item))
     else:
       print 'Unknown split'
     return split
@@ -106,14 +92,25 @@ def get_detections_from_im(net, im_file, image_id, conf_thresh=0.2):
     keep_boxes = np.where(max_conf >= conf_thresh)[0]
     if len(keep_boxes) < MIN_BOXES:
         keep_boxes = np.argsort(max_conf)[::-1][:MIN_BOXES]
+        print('Image {} has less boxes than {}'.format(image_id, MIN_BOXES))
     elif len(keep_boxes) > MAX_BOXES:
         keep_boxes = np.argsort(max_conf)[::-1][:MAX_BOXES]
-   
+
+    boxes = cls_boxes[keep_boxes]
+    features = pool5[keep_boxes]
+
+    n_pad = MIN_BOXES - len(keep_boxes)
+    boxes = np.pad(boxes, ((0, n_pad), (0, 0)), 'constant', constant_values=-1.)
+    features = np.pad(features, ((0, n_pad), (0, 0)), 'constant', constant_values=-1.)
+
+    if boxes.shape[0] != 100 and features.shape[0] != 100:
+        print(boxes.shape, features.shape)
+        raise 'Invalid boxes'
     return {
         'image_id': image_id,
         'image_h': np.size(im, 0),
         'image_w': np.size(im, 1),
-        'num_boxes' : len(keep_boxes),
+        'num_boxes' : boxes.shape[0],
         'boxes': base64.b64encode(cls_boxes[keep_boxes]),
         'features': base64.b64encode(pool5[keep_boxes])
     }   
@@ -154,13 +151,13 @@ def parse_args():
     
 def generate_tsv(gpu_id, prototxt, weights, image_ids, outfile):
     # First check if file exists, and if it is complete
-    wanted_ids = set([image_id[1] for image_id in image_ids])
+    wanted_ids = set([int(image_id[1]) for image_id in image_ids])
     found_ids = set()
     if os.path.exists(outfile):
         with open(outfile) as tsvfile:
             reader = csv.DictReader(tsvfile, delimiter='\t', fieldnames = FIELDNAMES)
             for item in reader:
-                found_ids.add(item['image_id'])
+                found_ids.add(int(item['image_id']))
     missing = wanted_ids - found_ids
     if len(missing) == 0:
         print 'GPU {:d}: already completed {:d}'.format(gpu_id, len(image_ids))
@@ -175,9 +172,9 @@ def generate_tsv(gpu_id, prototxt, weights, image_ids, outfile):
             _t = {'misc' : Timer()}
             count = 0
             for im_file,image_id in image_ids:
-                if image_id in missing:
+                if int(image_id) in missing:
                     _t['misc'].tic()
-                    writer.writerow(get_detections_from_im(net, im_file, image_id))
+                    writer.writerow(get_detections_from_im(net, im_file, image_id, conf_thresh=0.))
                     _t['misc'].toc()
                     if (count % 100) == 0:
                         print 'GPU {:d}: {:d}/{:d} {:.3f}s (projected finish: {:.2f} hours)' \
