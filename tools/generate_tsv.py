@@ -72,7 +72,7 @@ def load_image_ids(split_name):
     elif split_name == 'vrd_test':
       anno_path = '/gfs/users/jayden/Multimodal/Projects/RR/data/VRD/'
       img_path = '/gfs/users/jayden/data/sg_dataset/sg_vrd_test_images/'
-      with open(anno_path + 'annotations_vrd_test.json') as f:
+      with open(anno_path + 'annotations_test.json') as f:
         for item in json.load(f):
           filepath = os.path.join(img_path, item)
           split.append((filepath,item))
